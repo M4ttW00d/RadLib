@@ -1,0 +1,12 @@
+gr1:
+  ros__parameters:
+    # TF frame name for this detector unit.
+    # Change per instance when running multiple detectors on the same robot.
+    frame_id: "gr1_1"
+
+    # How many seconds of detector data are integrated before publishing.
+    update_interval_s: 1.0
+
+    # HID serial number string to select a specific unit.
+    # Leave empty to open the first GR1 found.
+    serial_number: ""

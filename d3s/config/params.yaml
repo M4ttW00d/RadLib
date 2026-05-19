@@ -1,0 +1,12 @@
+d3s:
+  ros__parameters:
+    # TF frame name for this detector unit.
+    # Change per instance when running multiple detectors on the same robot.
+    frame_id: "d3s_1"
+
+    # How many seconds of detector data are integrated before publishing.
+    update_interval_s: 1.0
+
+    # Serial port path for the D3S Bluetooth serial connection.
+    # Leave empty to auto-detect the first /dev/ttyACM* that responds as a D3S.
+    port: ""

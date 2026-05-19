@@ -1,0 +1,18 @@
+c12137:
+  ros__parameters:
+    # TF frame name for this detector unit.
+    # Change per instance when running multiple detectors.
+    frame_id: "c12137_1"
+
+    # Path to the G(E) conversion table CSV.
+    # Leave empty to use the default file bundled with this package.
+    ge_function_file: ""
+
+    # Energy window for dose-rate integration (keV).
+    # Events outside this window are ignored.
+    energy_lower_kev: 30
+    energy_upper_kev: 2000
+
+    # How many seconds of detector data are integrated before publishing.
+    # Lower values = faster updates but noisier readings.
+    update_interval_s: 1.0
