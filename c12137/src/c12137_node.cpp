@@ -41,7 +41,7 @@ C12137Node::C12137Node(const rclcpp::NodeOptions & options)
     }
 
     RCLCPP_INFO(get_logger(),
-                "Detector opened [frame: %s]. Energy window: %d–%d keV, interval: %.1f s",
+                "Detector opened [frame: %s]. Energy window: %ld-%ld keV, interval: %.1f s",
                 frame_id_.c_str(),
                 get_parameter("energy_lower_kev").as_int(),
                 get_parameter("energy_upper_kev").as_int(),
