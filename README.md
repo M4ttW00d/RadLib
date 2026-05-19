@@ -19,7 +19,7 @@ The library is designed for use in robotics and automated survey systems where d
 - [Platform Support](#platform-support)
 - [Building with ROS 2](#building-with-ros-2)
 - [Usage with ROS 2](#usage-with-ros-2)
-- [Usage without ROS 2](#usage-without-ros-2)
+- [Using RadLib as a C++ Library](#using-radlib-as-a-c-library)
 - [Contributing](#contributing)
 - [Acknowledgements](#acknowledgements)
 - [License](#license)
