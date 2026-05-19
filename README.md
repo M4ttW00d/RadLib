@@ -216,18 +216,32 @@ Node(package="gr1", executable="gamma_detector", name="gr1_2",
 
 ## Using RadLib as a C++ Library
 
-The `*_comm` and `*_driver` libraries have no ROS dependency and can be integrated into any C++ application. This is the intended path for applications that want to consume detector data directly without running a ROS graph.
+The comm and driver layers have no ROS dependency and can be built and used without a ROS installation. A root `CMakeLists.txt` is provided for this purpose.
 
-### Linking
+### Building
 
-After building with colcon, the installed CMake config files allow you to link against any driver:
+Install the system dependencies, then build and install with plain CMake:
 
-```cmake
-find_package(gr1 REQUIRED)
-target_link_libraries(my_app PRIVATE gr1::gr1_driver)
+```bash
+sudo apt-get install -y libusb-1.0-0-dev libhidapi-dev
+git clone https://github.com/M4ttW00d/RadLib.git
+cd RadLib
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
+make -j$(nproc)
+sudo make install
 ```
 
-The driver library pulls in the comm library transitively, so you only need to link the driver.
+### Linking from your own project
+
+After installing, add RadLib to your CMake project:
+
+```cmake
+find_package(radlib REQUIRED)
+target_link_libraries(my_app PRIVATE radlib::gr1_driver)
+```
+
+Each driver pulls in its comm library transitively, so you only need to link the driver. Available targets: `radlib::gr1_driver`, `radlib::sigma50_driver`, `radlib::c12137_driver`, `radlib::d3s_driver`.
 
 ### The Driver API
 
@@ -276,78 +290,127 @@ struct Reading {
 
 ### Examples
 
-**GR1 or Sigma 50:**
+Each example below is a complete program. Signal handling is included so Ctrl+C stops the read loop cleanly without interrupting mid-window.
+
+**GR1 or Sigma 50**
 
 ```cpp
+#include <atomic>
+#include <csignal>
+#include <cstdio>
+
 #include "gr1/gr1_driver.hpp"
 
-gr1::GR1Driver drv;
-if (!drv.open()) {
-    // device not found or could not be opened
-    return 1;
-}
+static std::atomic<bool> running{true};
+static void onSignal(int) { running = false; }
 
-gr1::Reading r;
-while (drv.read(r, 1.0)) {
-    // r.spectrum contains a 4096-bin histogram accumulated over ~1 second
-    // r.cps is the total count rate over that window
+int main()
+{
+    std::signal(SIGINT,  onSignal);
+    std::signal(SIGTERM, onSignal);
+
+    gr1::GR1Driver drv;
+    if (!drv.open()) {
+        std::fprintf(stderr, "error: could not open GR1 (is it plugged in?)\n");
+        return 1;
+    }
+
+    gr1::Reading r;
+    while (drv.read(r, 1.0, &running)) {
+        std::printf("cps: %.1f  elapsed: %.2f s\n", r.cps, r.elapsed_s);
+        // r.spectrum[i] is the count in channel i over the last window
+    }
+
+    drv.close();
+    return 0;
 }
 ```
 
-**C12137** (provide the G(E) calibration file path explicitly outside of ROS):
+For the Sigma 50, replace `gr1::GR1Driver` with `sigma50::Sigma50Driver` and include `sigma50/sigma50_driver.hpp`. The rest is identical.
+
+**C12137**
+
+The G(E) calibration file is at `c12137/data/gef_C12137.csv` in the repository, and installs to `share/radlib/c12137/gef_C12137.csv`. Pass its path to `open()`.
 
 ```cpp
+#include <atomic>
+#include <csignal>
+#include <cstdio>
+
 #include "c12137/c12137_driver.hpp"
 
-c12137::C12137Driver drv;
-if (!drv.open("/path/to/gef_C12137.csv", 30, 2000)) {
-    return 1;
-}
+static std::atomic<bool> running{true};
+static void onSignal(int) { running = false; }
 
-c12137::Reading r;
-while (drv.read(r, 1.0)) {
-    // r.dose_uSv_h is the computed air dose rate
-    // r.spectrum is the raw histogram if you need it
+int main()
+{
+    std::signal(SIGINT,  onSignal);
+    std::signal(SIGTERM, onSignal);
+
+    c12137::C12137Driver drv;
+    if (!drv.open("/path/to/gef_C12137.csv")) {
+        std::fprintf(stderr, "error: could not open C12137\n");
+        return 1;
+    }
+
+    c12137::Reading r;
+    while (drv.read(r, 1.0, &running)) {
+        std::printf("dose: %.4f uSv/h  temp: %.1f C\n", r.dose_uSv_h, r.temperature_c);
+        // r.spectrum[i] is the raw event count in channel i
+    }
+
+    drv.close();
+    return 0;
 }
 ```
 
-**D3S:**
+The second and third arguments to `open()` set the energy integration window in keV (defaults: 30 and 2000). Events outside this window are excluded from the dose calculation but still appear in the spectrum.
+
+**D3S**
 
 ```cpp
+#include <atomic>
+#include <csignal>
+#include <cstdio>
+
 #include "d3s/d3s_driver.hpp"
 
-d3s::D3SDriver drv;
-if (!drv.open()) {  // auto-detects /dev/ttyACM*
-    return 1;
-}
+static std::atomic<bool> running{true};
+static void onSignal(int) { running = false; }
 
-d3s::Reading r;
-while (drv.read(r, 1.0)) {
-    // r.neutron_cps for neutron rate
-    // r.spectrum for gamma spectroscopy
+int main()
+{
+    std::signal(SIGINT,  onSignal);
+    std::signal(SIGTERM, onSignal);
+
+    d3s::D3SDriver drv;
+    if (!drv.open()) {  // auto-detects the first /dev/ttyACM* that responds as a D3S
+        std::fprintf(stderr, "error: could not open D3S (is Bluetooth paired?)\n");
+        return 1;
+    }
+
+    d3s::Reading r;
+    while (drv.read(r, 1.0, &running)) {
+        std::printf("neutron cps: %.2f  temp: %.0f C\n", r.neutron_cps, r.temperature_c);
+        // r.spectrum[i] is the gamma count in channel i
+    }
+
+    drv.close();
+    return 0;
 }
 ```
 
-**Stopping cleanly from a signal handler or another thread:**
+To connect to a specific port rather than auto-detecting, pass the path to `open()`:
 
 ```cpp
-std::atomic<bool> running{true};
-
-// in a signal handler or another thread:
-//   running = false;
-
-gr1::Reading r;
-while (drv.read(r, 1.0, &running)) {
-    // process r
-}
-// read() returned false because running was set to false
+drv.open("/dev/ttyACM1");
 ```
 
 ---
 
 ## Contributing
 
-Contributions are welcome. The most useful areas right now are macOS support, Windows support, and additional detector packages.
+Contributions are welcome. The most useful areas are additional detector packages.
 
 ### How to contribute
 
