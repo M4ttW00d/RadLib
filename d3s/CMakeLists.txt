@@ -55,6 +55,13 @@ if(BUILD_TESTING)
   )
   target_link_libraries(test_d3s_driver d3s_driver)
   target_compile_features(test_d3s_driver PUBLIC cxx_std_17)
+
+  ament_add_gtest(test_d3s_comm test/test_d3s_comm.cpp)
+  target_include_directories(test_d3s_comm PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
+  target_link_libraries(test_d3s_comm d3s_comm)
+  target_compile_features(test_d3s_comm PUBLIC cxx_std_17)
 endif()
 
 ament_package()
