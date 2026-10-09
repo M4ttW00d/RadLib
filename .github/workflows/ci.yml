@@ -37,3 +37,43 @@ jobs:
           colcon test --packages-select c12137 gr1 sigma50 d3s
           colcon test-result --verbose
           colcon test-result | grep -q "0 errors, 0 failures"
+
+  standalone-cmake:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ pkg-config libusb-1.0-0-dev libhidapi-dev libgtest-dev
+
+      - name: Configure, build and test
+        run: |
+          cmake -S . -B build -DRADLIB_BUILD_TESTS=ON -DCMAKE_INSTALL_PREFIX="$PWD/install"
+          cmake --build build -j"$(nproc)"
+          (cd build && ctest --output-on-failure)
+
+      - name: Install and build the example against the installed package
+        run: |
+          cmake --install build
+          cmake -S examples/minimal -B build-example -DCMAKE_PREFIX_PATH="$PWD/install"
+          cmake --build build-example
+          ./build-example/radlib_minimal "$PWD/install/share/radlib/c12137/gef_C12137.csv"
+
+  docker-image:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t radlib:ci .
+
+      - name: Entrypoint rejects an unknown detector
+        run: |
+          if docker run --rm -e DETECTORS=bogus radlib:ci; then
+            echo "expected a non-zero exit for an unknown detector" >&2
+            exit 1
+          fi
