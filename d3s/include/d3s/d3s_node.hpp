@@ -37,6 +37,7 @@ public:
 
 private:
     void pollLoop();
+    bool reopen();
 
     d3s::D3SDriver driver_;
 
@@ -49,6 +50,7 @@ private:
 
     std::string frame_id_{"d3s_1"};
     double      update_interval_s_{1.0};
+    std::string port_;
 };
 
 }  // namespace d3s

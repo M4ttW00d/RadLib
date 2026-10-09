@@ -1,0 +1,16 @@
+# Access rules for the detectors RadLib drives. Install with:
+#   sudo cp udev/99-radlib.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# then reconnect the detectors.
+
+# Kromek GR1 and Sigma 50: HID devices read through /dev/hidraw*
+KERNEL=="hidraw*", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="0000", MODE="0666"
+KERNEL=="hidraw*", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="0023", MODE="0666"
+
+# Hamamatsu C12137: raw USB through libusb
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0661", ATTRS{idProduct}=="2917", MODE="0666"
+
+# Kromek D3S over USB: CDC-ACM serial port (/dev/ttyACM*). Members of the
+# dialout group can open it without this rule. IDs from the Kromek SDK device
+# table; check with lsusb if the port stays root-only.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2a5a", ATTRS{idProduct}=="01d3", MODE="0666"
