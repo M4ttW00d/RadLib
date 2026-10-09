@@ -9,10 +9,12 @@ c12137:
     ge_function_file: ""
 
     # Energy window for dose-rate integration (keV).
-    # Events outside this window are ignored.
+    # Events outside this window are left out of the dose rate but still
+    # appear in the published spectrum.
     energy_lower_kev: 30
     energy_upper_kev: 2000
 
-    # How many seconds of detector data are integrated before publishing.
+    # How many seconds of detector data are integrated before publishing,
+    # rounded to whole 100 ms device packets.
     # Lower values = faster updates but noisier readings.
     update_interval_s: 1.0
