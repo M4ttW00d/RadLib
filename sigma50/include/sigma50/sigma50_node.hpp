@@ -35,6 +35,7 @@ public:
 
 private:
     void pollLoop();
+    bool reopen();
 
     sigma50::Sigma50Driver driver_;
 
@@ -46,6 +47,7 @@ private:
 
     std::string frame_id_{"sigma50_1"};
     double      update_interval_s_{1.0};
+    std::string serial_number_;
 };
 
 }  // namespace sigma50

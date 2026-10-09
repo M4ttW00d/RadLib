@@ -3,6 +3,7 @@
 #include "d3s/d3s_node.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <stdexcept>
 
 namespace d3s
@@ -17,15 +18,20 @@ D3SNode::D3SNode(const rclcpp::NodeOptions & options)
 
     frame_id_          = get_parameter("frame_id").as_string();
     update_interval_s_ = get_parameter("update_interval_s").as_double();
-    std::string port   = get_parameter("port").as_string();
+    port_              = get_parameter("port").as_string();
+
+    if (!(update_interval_s_ > 0.0)) {
+        throw std::invalid_argument("update_interval_s must be greater than zero");
+    }
 
     spectrum_pub_    = create_publisher<std_msgs::msg::UInt16MultiArray>("~/spectrum", 10);
     temp_pub_        = create_publisher<sensor_msgs::msg::Temperature>("~/temperature", 10);
     neutron_cps_pub_ = create_publisher<std_msgs::msg::Float64>("~/neutron_cps", 10);
 
-    if (!driver_.open(port)) {
+    if (!driver_.open(port_)) {
         throw std::runtime_error(
-            "Failed to open Kromek D3S (is Bluetooth paired? is /dev/ttyACM* present?)");
+            "Failed to open Kromek D3S (is it connected by USB as /dev/ttyACM*, "
+            "or paired and bound with rfcomm as /dev/rfcomm*?)");
     }
 
     RCLCPP_INFO(get_logger(), "D3S opened [frame: %s, interval: %.1f s]",
@@ -42,11 +48,39 @@ D3SNode::~D3SNode()
     driver_.close();
 }
 
+bool D3SNode::reopen()
+{
+    // Back off for a second, in short steps so that shutdown stays responsive
+    for (int i = 0; i < 10 && running_; i++) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    if (!running_ || !driver_.open(port_)) return false;
+
+    RCLCPP_INFO(get_logger(), "D3S reopened");
+    return true;
+}
+
 void D3SNode::pollLoop()
 {
     d3s::Reading r;
+    int failures = 0;
+
     while (running_) {
-        if (!driver_.read(r, update_interval_s_, &running_)) continue;
+        if (!driver_.isOpen()) {
+            reopen();  // sleeps before trying, so a missing device does not spin
+            continue;
+        }
+
+        if (!driver_.read(r, update_interval_s_, &running_)) {
+            if (!running_) break;
+            failures++;
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                                 "D3S read failed (%d in a row); reopening the device",
+                                 failures);
+            driver_.close();
+            continue;
+        }
+        failures = 0;
 
         auto stamp = this->now();
 
@@ -69,8 +103,8 @@ void D3SNode::pollLoop()
         temp_msg.variance        = 0.0;
         temp_pub_->publish(temp_msg);
 
-        RCLCPP_INFO(get_logger(), "neutron_cps = %.2f  |  temp = %.0f °C",
-                    r.neutron_cps, r.temperature_c);
+        RCLCPP_DEBUG(get_logger(), "neutron_cps = %.2f  |  temp = %.0f °C",
+                     r.neutron_cps, r.temperature_c);
     }
 }
 
