@@ -33,8 +33,6 @@ constexpr uint8_t I2C_TEMP_ANALOG    = 3;
 
 // Bulk endpoint: endpoint 2, IN direction (0x80 | 0x02)
 constexpr uint8_t BULK_EP            = 0x82;
-constexpr int     BULK_HEADER_WORDS  = 8;
-constexpr int     BULK_TOTAL_WORDS   = BULK_HEADER_WORDS + 1048;  // = 1056
 constexpr int     BULK_TIMEOUT_MS    = 200;
 }
 
@@ -42,11 +40,33 @@ constexpr int     BULK_TIMEOUT_MS    = 200;
 // Helpers
 // ---------------------------------------------------------------------------
 
-double C12137Device::voltToCelsius(uint16_t volt)
+double adcToCelsius(uint16_t adc_digit)
 {
     // LM94021 GS0=0 GS1=0: 0 °C → 1034 mV, 50 °C → 760 mV
     // ADC full-scale = 65535 counts = 1250 mV
-    return -0.00348 * static_cast<double>(volt) + 188.686;
+    return -0.00348 * static_cast<double>(adc_digit) + 188.686;
+}
+
+bool decodeBulkPacket(const uint16_t * words, size_t word_count,
+                      uint16_t & index, uint16_t & size,
+                      uint16_t * data, double & temperature_celsius)
+{
+    if (word_count < static_cast<size_t>(BULK_TOTAL_WORDS)) return false;
+
+    // Byte-swap the header words (device sends them big-endian)
+    uint16_t header[BULK_HEADER_WORDS];
+    for (int i = 0; i < BULK_HEADER_WORDS; i++) {
+        header[i] = swap16(words[i]);
+    }
+
+    if (header[0] != 0x5A5A || header[1] != 0x5A5A) return false;
+
+    index = header[4];
+    size  = (header[2] <= BULK_DATA_SIZE) ? header[2] : static_cast<uint16_t>(BULK_DATA_SIZE);
+    std::memcpy(data, &words[BULK_HEADER_WORDS], size * sizeof(uint16_t));
+    temperature_celsius = adcToCelsius(header[5]);
+
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +137,8 @@ void C12137Device::close()
 
 bool C12137Device::reset(uint16_t level)
 {
+    if (!dev_) return false;
+
     int r = libusb_control_transfer(dev_, REQ_OUT, REQ_RESET,
                                     level, 0, nullptr, 0, TIMEOUT_MS);
     usleep(100'000);  // 100 ms — device requires settling time after reset
@@ -125,18 +147,22 @@ bool C12137Device::reset(uint16_t level)
 
 bool C12137Device::getEnergyThreshold(uint16_t & index_out)
 {
+    if (!dev_) return false;
+
     uint16_t buf = 0;
     int r = libusb_control_transfer(dev_, REQ_IN, REQ_ENERGY_THRESH,
                                     0, 0,
                                     reinterpret_cast<uint8_t *>(&buf), 2,
                                     TIMEOUT_MS);
     if (r < 2) return false;
-    index_out = swapBytes(buf);
+    index_out = swap16(buf);
     return true;
 }
 
 bool C12137Device::setEnergyThreshold(uint16_t index)
 {
+    if (!dev_) return false;
+
     int r = libusb_control_transfer(dev_, REQ_OUT, REQ_ENERGY_THRESH,
                                     index, 0, nullptr, 0, TIMEOUT_MS);
     return r >= 0;
@@ -144,18 +170,22 @@ bool C12137Device::setEnergyThreshold(uint16_t index)
 
 bool C12137Device::getRadiationLimit(uint16_t area, uint16_t & kev_out)
 {
+    if (!dev_) return false;
+
     uint16_t buf = 0;
     int r = libusb_control_transfer(dev_, REQ_IN, REQ_RADIATION_LIMIT,
                                     0, area,
                                     reinterpret_cast<uint8_t *>(&buf), 2,
                                     TIMEOUT_MS);
     if (r < 2) return false;
-    kev_out = swapBytes(buf);
+    kev_out = swap16(buf);
     return true;
 }
 
 bool C12137Device::setRadiationLimit(uint16_t area, uint16_t kev)
 {
+    if (!dev_) return false;
+
     int r = libusb_control_transfer(dev_, REQ_OUT, REQ_RADIATION_LIMIT,
                                     kev, area, nullptr, 0, TIMEOUT_MS);
     return r >= 0;
@@ -165,17 +195,8 @@ bool C12137Device::getDataAndTemperature(uint16_t & index, uint16_t & size,
                                          uint16_t * data,
                                          double & temperature_celsius)
 {
-    /**
-     * Bulk packet layout (uint16, big-endian header / little-endian data):
-     *   [0] 0x5A5A  [1] 0x5A5A   — sync words
-     *   [2] count                 — number of events (0–1000)
-     *   [3] 0x0000
-     *   [4] index                 — increments every 100 ms
-     *   [5] temperature ADC
-     *   [6] 0x0000  [7] debug
-     *   [8..1007]   event words   — top 12 bits = ADC channel
-     *   [1008..1055] padding
-     */
+    if (!dev_) return false;
+
     uint16_t buf[BULK_TOTAL_WORDS];
     int transferred = 0;
 
@@ -191,23 +212,13 @@ bool C12137Device::getDataAndTemperature(uint16_t & index, uint16_t & size,
         return false;
     }
 
-    // Byte-swap the header words (device sends them big-endian)
-    for (int i = 0; i < BULK_HEADER_WORDS; i++) {
-        buf[i] = swapBytes(buf[i]);
-    }
-
-    if (buf[0] != 0x5A5A || buf[1] != 0x5A5A) return false;
-
-    index = buf[4];
-    size  = (buf[2] <= BULK_DATA_SIZE) ? buf[2] : BULK_DATA_SIZE;
-    std::memcpy(data, &buf[BULK_HEADER_WORDS], size * sizeof(uint16_t));
-    temperature_celsius = voltToCelsius(buf[5]);
-
-    return true;
+    return decodeBulkPacket(buf, BULK_TOTAL_WORDS, index, size, data, temperature_celsius);
 }
 
 bool C12137Device::clearBulkBuffer()
 {
+    if (!dev_) return false;
+
     int r = libusb_control_transfer(dev_, REQ_OUT, REQ_CLEAR_BULK,
                                     0, 0, nullptr, 0, TIMEOUT_MS);
     return r >= 0;
@@ -215,18 +226,22 @@ bool C12137Device::clearBulkBuffer()
 
 bool C12137Device::readEeprom(uint16_t address, uint16_t & data_out)
 {
+    if (!dev_) return false;
+
     uint16_t buf = 0;
     int r = libusb_control_transfer(dev_, REQ_IN, REQ_READ_EEPROM,
                                     address, 0x02,
                                     reinterpret_cast<uint8_t *>(&buf), 2,
                                     TIMEOUT_MS);
     if (r < 2) return false;
-    data_out = swapBytes(buf);
+    data_out = swap16(buf);
     return true;
 }
 
 bool C12137Device::getHvpsTemperature(double & celsius_out, uint16_t & raw_digit_out)
 {
+    if (!dev_) return false;
+
     // Two-phase I2C request: send request, wait, then read result
     int r = libusb_control_transfer(dev_, REQ_OUT, REQ_I2C_RXD,
                                     I2C_TEMP_ANALOG, 0,
@@ -242,7 +257,7 @@ bool C12137Device::getHvpsTemperature(double & celsius_out, uint16_t & raw_digit
                                  TIMEOUT_MS);
     if (r < 2) return false;
 
-    uint16_t value = swapBytes(buf);
+    uint16_t value = swap16(buf);
     raw_digit_out = value;
 
     // Same LM94021 conversion used in the HVPS path

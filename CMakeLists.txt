@@ -129,3 +129,25 @@ install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/radlibConfigVersion.cmake
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/radlib
 )
+
+# --- Tests (standalone build) ---
+option(RADLIB_BUILD_TESTS "Build the unit tests (requires GTest)" OFF)
+if(RADLIB_BUILD_TESTS)
+  enable_testing()
+  find_package(GTest REQUIRED)
+
+  # Every <package>/test/test_*.cpp is a self-contained gtest binary that links
+  # that package's driver library (and through it its comm library).
+  file(GLOB RADLIB_TEST_SOURCES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/*/test/test_*.cpp)
+  foreach(test_src ${RADLIB_TEST_SOURCES})
+    get_filename_component(test_name ${test_src} NAME_WE)
+    get_filename_component(test_dir  ${test_src} DIRECTORY)
+    get_filename_component(pkg_dir   ${test_dir} DIRECTORY)
+    get_filename_component(pkg       ${pkg_dir}  NAME)
+    add_executable(${test_name} ${test_src})
+    target_link_libraries(${test_name} ${pkg}_driver GTest::GTest GTest::Main)
+    target_compile_features(${test_name} PUBLIC cxx_std_17)
+    add_test(NAME ${test_name} COMMAND ${test_name})
+  endforeach()
+endif()

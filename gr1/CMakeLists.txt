@@ -59,6 +59,13 @@ if(BUILD_TESTING)
   )
   target_link_libraries(test_gr1_driver gr1_driver)
   target_compile_features(test_gr1_driver PUBLIC cxx_std_17)
+
+  ament_add_gtest(test_gr1_comm test/test_gr1_comm.cpp)
+  target_include_directories(test_gr1_comm PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  )
+  target_link_libraries(test_gr1_comm gr1_comm)
+  target_compile_features(test_gr1_comm PUBLIC cxx_std_17)
 endif()
 
 ament_package()
