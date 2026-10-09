@@ -272,9 +272,10 @@ struct Reading {
 **`c12137::Reading`**
 ```cpp
 struct Reading {
-    std::array<uint32_t, 4096> spectrum;  // accumulated event histogram
-    double dose_uSv_h;                    // air dose rate in µSv/h
+    std::array<uint32_t, 4096> spectrum;  // every event, regardless of the energy window
+    double dose_uSv_h;                    // air dose rate in µSv/h from events inside the window
     double temperature_c;                 // detector temperature
+    double elapsed_s;                     // detector time integrated (whole 100 ms packets)
 };
 ```
 
@@ -364,7 +365,7 @@ int main()
 }
 ```
 
-The second and third arguments to `open()` set the energy integration window in keV (defaults: 30 and 2000). Events outside this window are excluded from the dose calculation but still appear in the spectrum.
+The second and third arguments to `open()` set the energy integration window in keV (defaults: 30 and 2000). Events outside this window are excluded from the dose calculation but still appear in the spectrum. The interval passed to `read()` is rounded to whole 100 ms device packets, and `elapsed_s` reports the time actually integrated.
 
 **D3S**
 

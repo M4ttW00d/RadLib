@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -31,6 +32,9 @@ static void writeTmpGe(const std::string & csv)
     std::ofstream f(kTmpGe);
     f << csv;
 }
+
+// Event word as the device sends it: the channel sits in the top 12 bits
+static uint16_t enc(uint16_t addr) { return static_cast<uint16_t>(addr << 4); }
 
 struct FakeC12137Device
 {
@@ -123,6 +127,87 @@ TEST(C12137DriverTest, SkipsDuplicatePacketIndex)
     EXPECT_TRUE(drv.read(r, 0.2));
     // Only the first packet's event should appear; duplicate was skipped
     EXPECT_EQ(r.spectrum[addr], 1u);
+}
+
+TEST(C12137DriverTest, OutOfWindowEventsStayInSpectrumButNotInDose)
+{
+    writeTmpGe(makeGeCsv());
+
+    FakeC12137Device fake;
+    // Window 100-200 keV (energy equals channel number in the test table):
+    // channel 50 is below it, channel 150 inside it
+    fake.calls = {{true, 1, 2, {enc(50), enc(150)}, 20.0}};
+
+    TestDriver drv(std::move(fake));
+    ASSERT_TRUE(drv.open(kTmpGe, 100, 200));
+
+    Reading r;
+    EXPECT_TRUE(drv.read(r, 0.1));
+    EXPECT_EQ(r.spectrum[50], 1u);
+    EXPECT_EQ(r.spectrum[150], 1u);
+    // one in-window event, G(E) = 1 pSv per count, over one 100 ms packet
+    EXPECT_NEAR(r.dose_uSv_h, 1.0 * 3600.0 / 0.1 / 1.0e6, 1e-12);
+}
+
+TEST(C12137DriverTest, RoundsWindowToWholePackets)
+{
+    writeTmpGe(makeGeCsv());
+
+    FakeC12137Device fake;
+    for (uint16_t idx = 1; idx <= 3; idx++)
+        fake.calls.push_back({true, idx, 1, {enc(300)}, 20.0});
+
+    TestDriver drv(std::move(fake));
+    ASSERT_TRUE(drv.open(kTmpGe, 0, GE_TABLE_SIZE - 1));
+
+    Reading r;
+    // 0.3 s is three 100 ms packets; truncating 0.3 * 10 would give two
+    EXPECT_TRUE(drv.read(r, 0.3));
+    EXPECT_EQ(r.spectrum[300], 3u);
+    EXPECT_NEAR(r.elapsed_s, 0.3, 1e-12);
+    EXPECT_NEAR(r.dose_uSv_h, 3.0 * 3600.0 / 0.3 / 1.0e6, 1e-12);
+}
+
+TEST(C12137DriverTest, ZeroIntervalStillCollectsOnePacket)
+{
+    writeTmpGe(makeGeCsv());
+
+    FakeC12137Device fake;
+    fake.calls = {{true, 1, 1, {enc(600)}, 20.0}};
+
+    TestDriver drv(std::move(fake));
+    ASSERT_TRUE(drv.open(kTmpGe, 0, GE_TABLE_SIZE - 1));
+
+    Reading r;
+    EXPECT_TRUE(drv.read(r, 0.0));
+    EXPECT_EQ(r.spectrum[600], 1u);
+    EXPECT_NEAR(r.elapsed_s, 0.1, 1e-12);
+    EXPECT_TRUE(std::isfinite(r.dose_uSv_h));
+}
+
+TEST(C12137DriverTest, KeepsPacketIndexAcrossReads)
+{
+    writeTmpGe(makeGeCsv());
+
+    FakeC12137Device fake;
+    fake.calls = {
+        {true, 1, 1, {enc(400)}, 20.0},  // first read: counted
+        {true, 1, 1, {enc(400)}, 20.0},  // second read opens on the same packet: skip it
+        {true, 2, 1, {enc(401)}, 20.0},
+        {true, 3, 1, {enc(402)}, 20.0},
+    };
+
+    TestDriver drv(std::move(fake));
+    ASSERT_TRUE(drv.open(kTmpGe, 0, GE_TABLE_SIZE - 1));
+
+    Reading r;
+    EXPECT_TRUE(drv.read(r, 0.1));
+    EXPECT_EQ(r.spectrum[400], 1u);
+
+    EXPECT_TRUE(drv.read(r, 0.2));
+    EXPECT_EQ(r.spectrum[400], 0u);
+    EXPECT_EQ(r.spectrum[401], 1u);
+    EXPECT_EQ(r.spectrum[402], 1u);
 }
 
 TEST(C12137DriverTest, ReturnsFalseWhenStopFlagSet)
