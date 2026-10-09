@@ -8,9 +8,15 @@
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>pkg-config</buildtool_depend>
 
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
+
+  <depend>libhidapi-dev</depend>
+
+  <exec_depend>ros2launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
 
