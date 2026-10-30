@@ -16,9 +16,11 @@ The library is designed for use in robotics and automated survey systems where d
 - [Supported Hardware](#supported-hardware)
 - [Architecture](#architecture)
 - [Dependencies](#dependencies)
+- [Device Permissions](#device-permissions)
 - [Platform Support](#platform-support)
 - [Building with ROS 2](#building-with-ros-2)
 - [Usage with ROS 2](#usage-with-ros-2)
+- [Docker](#docker)
 - [Using RadLib as a C++ Library](#using-radlib-as-a-c-library)
 - [Contributing](#contributing)
 - [Acknowledgements](#acknowledgements)
@@ -93,6 +95,19 @@ The comm and driver layers are built as standalone libraries (`c12137_comm`, `c1
 | `d3s` | none (POSIX serial) |
 
 **ROS 2 packages** (node layer only): `rclcpp`, `std_msgs`, `sensor_msgs` (c12137 and d3s), `ament_index_cpp` (c12137).
+
+---
+
+## Device Permissions
+
+On Linux the detectors are only accessible as root until udev rules grant access. Install the bundled rules once:
+
+```bash
+sudo cp udev/99-radlib.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Then reconnect the detectors. The GR1 and Sigma 50 are read through `/dev/hidraw*`, the C12137 through `/dev/bus/usb`, and the D3S through `/dev/ttyACM*` over USB (membership of the `dialout` group also covers that one).
 
 ---
 
@@ -211,6 +226,32 @@ Node(package="gr1", executable="gamma_detector", name="gr1_2",
 /robot1/d3s/neutron_cps
 /robot1/d3s/temperature
 ```
+
+---
+
+## Docker
+
+A prebuilt image with all four nodes is published at `ghcr.io/m4ttw00d/radlib`. It starts the detectors named in `DETECTORS` under the `ROBOT_NAME` namespace and records every topic to a bag under `/data`:
+
+```bash
+docker run --network=host \
+  -v /host/data:/data \
+  --device /dev/hidraw0 \
+  --device /dev/ttyACM0 \
+  -e ROBOT_NAME=robot1 \
+  -e DETECTORS=gr1,d3s \
+  ghcr.io/m4ttw00d/radlib:latest
+```
+
+Pass the device nodes the chosen detectors need, or run with `--privileged`:
+
+| Detector | Device flag |
+|---|---|
+| `gr1`, `sigma50` | `--device /dev/hidrawN`, the kernel HID node rather than `/dev/bus/usb`; find N with `ls -l /dev/hidraw*` |
+| `c12137` | `--device /dev/bus/usb` |
+| `d3s` | `--device /dev/ttyACM0` over USB, or `/dev/rfcomm0` over Bluetooth |
+
+The container exits with a non-zero status as soon as any node or the recorder stops, so a `--restart` policy can bring it back. Run it without `DETECTORS` to print the usage text.
 
 ---
 

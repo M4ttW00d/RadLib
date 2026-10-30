@@ -35,6 +35,7 @@ public:
 
 private:
     void pollLoop();
+    bool reopen();
 
     gr1::GR1Driver driver_;
 
@@ -46,6 +47,7 @@ private:
 
     std::string frame_id_{"gr1_1"};
     double      update_interval_s_{1.0};
+    std::string serial_number_;
 };
 
 }  // namespace gr1

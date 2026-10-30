@@ -38,6 +38,7 @@ public:
 
 private:
     void pollLoop();
+    bool reopen();
 
     c12137::C12137Driver driver_;
 
@@ -50,6 +51,9 @@ private:
 
     std::string frame_id_{"c12137_1"};
     double      update_interval_s_{1.0};
+    std::string ge_file_;
+    uint16_t    energy_lower_kev_{30};
+    uint16_t    energy_upper_kev_{2000};
 };
 
 }  // namespace c12137
