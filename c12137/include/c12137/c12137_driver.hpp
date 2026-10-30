@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <istream>
@@ -20,9 +21,10 @@ namespace c12137
 
 struct Reading
 {
-    std::array<uint32_t, GE_TABLE_SIZE> spectrum{};
-    double dose_uSv_h{0.0};
+    std::array<uint32_t, GE_TABLE_SIZE> spectrum{};  // every event, regardless of the energy window
+    double dose_uSv_h{0.0};                           // from events inside the energy window only
     double temperature_c{0.0};
+    double elapsed_s{0.0};                            // detector time integrated (whole 100 ms packets)
 };
 
 template<typename TDevice = C12137Device>
@@ -42,7 +44,13 @@ public:
         if (!loadGeFunction(f)) return false;
         lower_index_ = keVToIndex(energy_lower_kev);
         upper_index_ = keVToIndex(energy_upper_kev);
-        return device_.open();
+        if (!device_.open()) return false;
+
+        // Start from an empty buffer once. From here on packets are tracked by
+        // index across read() calls so that none is counted twice or dropped.
+        device_.clearBulkBuffer();
+        have_last_index_ = false;
+        return true;
     }
 
     void close() { device_.close(); }
@@ -51,18 +59,17 @@ public:
     bool read(Reading & out, double interval_s,
               const std::atomic<bool> * running = nullptr)
     {
-        constexpr int POLL_INTERVAL_US = 20'000;
-        constexpr int RETRY_LIMIT      = 5;
+        constexpr int    POLL_INTERVAL_US = 20'000;
+        constexpr int    RETRY_LIMIT      = 5;
+        constexpr double TICK_S           = 0.1;  // the device emits one packet every 100 ms
 
         out.spectrum.fill(0);
 
-        int      target_ticks = static_cast<int>(interval_s * 10.0);
-        int      collected    = 0;
-        int      err_count    = 0;
-        uint16_t old_index    = 0;
-        double   last_temp    = 0.0;
-
-        device_.clearBulkBuffer();
+        // Whole packets only, rounded rather than truncated (0.3 s is 3 packets, not 2)
+        const int target_ticks = std::max(1, static_cast<int>(std::lround(interval_s / TICK_S)));
+        int    collected = 0;
+        int    err_count = 0;
+        double last_temp = 0.0;
 
         while (collected < target_ticks) {
             if (running && !running->load()) return false;
@@ -81,26 +88,29 @@ public:
             err_count = 0;
             last_temp = temperature;
 
-            if (new_index == old_index) continue;
-            old_index = new_index;
+            // The device keeps returning the current packet until the next one is ready
+            if (have_last_index_ && new_index == last_index_) continue;
+            last_index_      = new_index;
+            have_last_index_ = true;
 
             for (uint16_t i = 0; i < size; i++) {
-                uint16_t addr = (event_buf[i] >> 4) & 0x0FFF;
-                if (addr > lower_index_ && addr < upper_index_) {
-                    out.spectrum[addr]++;
-                }
+                const uint16_t addr = (event_buf[i] >> 4) & 0x0FFF;
+                out.spectrum[addr]++;
             }
             collected++;
         }
 
         if (running && !running->load()) return false;
 
+        // Dose from the energy window only; the spectrum keeps everything
         double sv_pSv = 0.0;
-        for (int i = 0; i < GE_TABLE_SIZE; i++) {
+        for (int i = lower_index_ + 1; i < upper_index_; i++) {
             sv_pSv += static_cast<double>(out.spectrum[i]) * ge_factor_[i];
         }
-        out.dose_uSv_h    = sv_pSv * 3600.0 / interval_s / 1.0e6;
+        const double live_s = collected * TICK_S;
+        out.dose_uSv_h    = sv_pSv * 3600.0 / live_s / 1.0e6;
         out.temperature_c = last_temp;
+        out.elapsed_s     = live_s;
 
         return true;
     }
@@ -133,6 +143,8 @@ private:
     std::array<double, GE_TABLE_SIZE> ge_factor_{};
     uint16_t lower_index_{0};
     uint16_t upper_index_{static_cast<uint16_t>(GE_TABLE_SIZE - 1)};
+    uint16_t last_index_{0};
+    bool     have_last_index_{false};
 };
 
 using C12137Driver = C12137DriverT<>;
