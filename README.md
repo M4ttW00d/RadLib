@@ -34,6 +34,8 @@ The library is designed for use in robotics and automated survey systems where d
 
 A compact gamma-ray detection module combining a scintillator crystal with an MPPC (Multi-Pixel Photon Counter) silicon photodetector. Onboard signal processing and A/D conversion produce a 4096-channel energy spectrum over USB. RadLib computes air dose rate in µSv/h from the spectrum using a G(E) conversion factor table bundled with the package.
 
+Two tables are bundled in `c12137/data`: `gef_C12137.csv` for the C12137 and C12137-00D, and `gef_C12137-01.csv` for the larger C12137-01. Both the ROS node and the examples default to the first, so a -01 unit must be pointed at the second through `ge_function_file` (or the first argument of `open()`), otherwise its dose rate reads roughly twelve times too high. The dose rate is the sum of counts times G(E) over the energy window, treating the table values as pSv per count.
+
 - Connection: USB bulk transfer (libusb-1.0), VID/PID `0x0661` / `0x2917`
 - Outputs: energy spectrum, dose rate (µSv/h), detector temperature
 
@@ -181,7 +183,7 @@ All packages expose `frame_id` and `update_interval_s`. Edit `config/params.yaml
 |---|---|---|
 | `frame_id` | `c12137_1` | TF frame name for this detector unit |
 | `update_interval_s` | `1.0` | Integration window length in seconds |
-| `ge_function_file` | *(bundled)* | Path to G(E) CSV; empty uses the file bundled with the package |
+| `ge_function_file` | *(bundled)* | Path to G(E) CSV; empty uses the bundled `gef_C12137.csv` (set it to `gef_C12137-01.csv` for a C12137-01) |
 | `energy_lower_kev` | `30` | Lower bound of dose rate integration window (keV) |
 | `energy_upper_kev` | `2000` | Upper bound of dose rate integration window (keV) |
 
@@ -189,9 +191,9 @@ All packages expose `frame_id` and `update_interval_s`. Edit `config/params.yaml
 
 | Parameter | Default | Description |
 |---|---|---|
-| `frame_id` | `gr1_1` / `sigma50_1` | TF frame name for this detector unit |
+| `frame_id` | `gr1_1` / `sigma50_1` | TF frame name for this detector unit (reserved; no GR1 or Sigma 50 message carries a header yet) |
 | `update_interval_s` | `1.0` | Integration window length in seconds |
-| `serial_number` | *(empty)* | HID serial number to select a specific unit; empty opens the first found |
+| `serial_number` | *(empty)* | USB serial string to select a specific unit; empty opens the first found. A unit that reports no serial string can only be opened with an empty value |
 
 **`d3s`**
 
@@ -203,7 +205,7 @@ All packages expose `frame_id` and `update_interval_s`. Edit `config/params.yaml
 
 ### Running multiple units of the same type
 
-Override `name`, `frame_id`, and `serial_number` (or `port`) per instance:
+Override `name`, `frame_id`, and `serial_number` (or `port`) per instance. Every instance needs a distinct `serial_number` or `port`: two nodes with the value left empty both open the first unit found and read the same detector twice.
 
 ```python
 Node(package="gr1", executable="gamma_detector", name="gr1_1",
@@ -213,6 +215,8 @@ Node(package="gr1", executable="gamma_detector", name="gr1_2",
 ```
 
 ### Topic layout for a robot running all four detectors
+
+The `spectrum` topics are `std_msgs/UInt16MultiArray` messages without a header, so they carry no timestamp or frame. Each channel count is clamped to 65535 per window, which only matters for long windows on strong sources. `cps`, `neutron_cps` and `dose_rate` are `std_msgs/Float64`; `temperature` is `sensor_msgs/Temperature` and does carry the stamp and `frame_id`.
 
 ```
 /robot1/c12137/spectrum
