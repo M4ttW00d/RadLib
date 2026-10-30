@@ -277,6 +277,8 @@ make -j$(nproc)
 sudo make install
 ```
 
+Add `-DRADLIB_BUILD_TESTS=ON` to the `cmake` line to build the unit tests as well (they need `libgtest-dev`), then run `ctest` in the build directory. A complete consumer project that links every driver is in `examples/minimal`.
+
 ### Linking from your own project
 
 After installing, add RadLib to your CMake project:
