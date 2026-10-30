@@ -51,11 +51,11 @@ A portable gamma spectrometer using a 1" x 1" x 2" CsI (caesium iodide) scintill
 
 ### Kromek D3S
 
-A wearable personal radiation detector combining a CsI(Tl) gamma spectrometer (30 keV to 3 MeV) with a compact thermal neutron scintillator for simultaneous dual-particle detection. Designed for first responders and networked radiation monitoring. Connects wirelessly via Bluetooth SPP, appearing as a serial port on the host system.
+A wearable personal radiation detector combining a CsI(Tl) gamma spectrometer (30 keV to 3 MeV) with a compact thermal neutron scintillator for simultaneous dual-particle detection. Designed for first responders and networked radiation monitoring. Connects over USB or wirelessly via Bluetooth SPP; either way it appears as a serial port on the host system.
 
-- Connection: Bluetooth SPP at `/dev/ttyACM*`, 115200 baud
+- Connection: 115200 baud serial over USB (CDC-ACM, `/dev/ttyACM*`) or Bluetooth SPP (`/dev/rfcomm*`, see [D3S over Bluetooth](#d3s-over-bluetooth))
 - Outputs: gamma spectrum, neutron counts per second, detector temperature
-- Auto-detects the first `/dev/ttyACM*` that identifies as a D3S (serial number prefix `SGM`)
+- Auto-detects by probing every `/dev/ttyACM*` then every `/dev/rfcomm*` and keeping the first unit whose serial number starts with `SGM`
 
 ---
 
@@ -184,7 +184,7 @@ All packages expose `frame_id` and `update_interval_s`. Edit `config/params.yaml
 |---|---|---|
 | `frame_id` | `d3s_1` | TF frame name for this detector unit |
 | `update_interval_s` | `1.0` | Integration window length in seconds |
-| `port` | *(empty)* | Serial port path; empty auto-detects `/dev/ttyACM*` |
+| `port` | *(empty)* | Serial port path; empty probes `/dev/ttyACM*` then `/dev/rfcomm*` |
 
 ### Running multiple units of the same type
 
@@ -405,6 +405,19 @@ To connect to a specific port rather than auto-detecting, pass the path to `open
 ```cpp
 drv.open("/dev/ttyACM1");
 ```
+
+The first spectrum the D3S returns after a pause covers everything it accumulated since it was last polled, so the driver requests and discards one frame after `open()`.
+
+### D3S over Bluetooth
+
+Pair the unit once, then bind an RFCOMM device to its serial port profile channel. The device node exists immediately and the link comes up when the port is opened:
+
+```bash
+bluetoothctl pair AA:BB:CC:DD:EE:FF
+sudo rfcomm bind 0 AA:BB:CC:DD:EE:FF 1    # creates /dev/rfcomm0
+```
+
+Auto-detection probes `/dev/rfcomm*` after `/dev/ttyACM*`. To skip probing, pass the path explicitly through the `port` parameter or `drv.open("/dev/rfcomm0")`.
 
 ---
 

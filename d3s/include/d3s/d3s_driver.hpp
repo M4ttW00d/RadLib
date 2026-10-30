@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <string>
 
 #include "d3s/d3s_comm.hpp"
@@ -17,7 +18,7 @@ struct Reading
 {
     std::array<uint32_t, SPECTRUM_BINS> spectrum{};
     double neutron_cps{0.0};
-    double temperature_c{0.0};
+    double temperature_c{0.0};   // NaN if the status read failed
     double elapsed_s{0.0};
 };
 
@@ -28,7 +29,13 @@ public:
     D3SDriverT() = default;
     explicit D3SDriverT(TDevice device) : device_(std::move(device)) {}
 
-    bool open(const std::string & port = "") { return device_.open(port); }
+    bool open(const std::string & port = "")
+    {
+        if (!device_.open(port)) return false;
+        discard_first_frame_ = true;
+        return true;
+    }
+
     void close() { device_.close(); }
     bool isOpen() const { return device_.isOpen(); }
 
@@ -36,6 +43,14 @@ public:
               const std::atomic<bool> * running = nullptr)
     {
         constexpr int RETRY_LIMIT = 5;
+
+        // The first spectrum after open() holds everything the detector
+        // accumulated since it was last polled, which may be hours, so it
+        // belongs to no window. Request it and throw it away.
+        if (discard_first_frame_) {
+            SpectrumData stale{};
+            if (device_.getSpectrum(stale)) discard_first_frame_ = false;
+        }
 
         out.spectrum.fill(0);
         uint64_t total_neutrons = 0;
@@ -69,8 +84,9 @@ public:
             out.elapsed_s = elapsed;
 
             int8_t temp_c = 0;
-            device_.getTemperature(temp_c);
-            out.temperature_c = static_cast<double>(temp_c);
+            out.temperature_c = device_.getTemperature(temp_c)
+                ? static_cast<double>(temp_c)
+                : std::numeric_limits<double>::quiet_NaN();
 
             return true;
         }
@@ -78,6 +94,7 @@ public:
 
 private:
     TDevice device_;
+    bool    discard_first_frame_{false};
 };
 
 using D3SDriver = D3SDriverT<>;

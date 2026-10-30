@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -34,10 +35,11 @@ struct FakeD3SDevice
     bool getTemperature(int8_t & celsius_out)
     {
         celsius_out = temperature;
-        return true;
+        return temperature_ok;
     }
 
     bool open_result{true};
+    bool temperature_ok{true};
     int8_t temperature{25};
     size_t next{0};
     std::vector<Call> calls;
@@ -106,6 +108,66 @@ TEST(D3SDriverTest, ReadsTemperatureAtEndOfWindow)
     Reading r;
     EXPECT_TRUE(drv.read(r, 0.0));
     EXPECT_DOUBLE_EQ(r.temperature_c, 35.0);
+}
+
+TEST(D3SDriverTest, DiscardsFirstFrameAfterOpen)
+{
+    FakeD3SDevice fake;
+    fake.calls = {
+        {true, makeSpectrum(100, 7, 3, 60000), 0},  // accumulated while idle: not ours
+        {true, makeSpectrum(200, 2, 1, 1000), 0},
+    };
+    TestDriver drv(std::move(fake));
+    ASSERT_TRUE(drv.open(""));
+
+    Reading r;
+    EXPECT_TRUE(drv.read(r, 0.0));
+    EXPECT_EQ(r.spectrum[100], 0u);
+    EXPECT_EQ(r.spectrum[200], 2u);
+    EXPECT_DOUBLE_EQ(r.neutron_cps, 1.0);
+}
+
+TEST(D3SDriverTest, DiscardsOnlyOneFrame)
+{
+    FakeD3SDevice fake;
+    fake.calls = {
+        {true, makeSpectrum(100, 7), 0},
+        {true, makeSpectrum(200, 2), 0},
+        {true, makeSpectrum(300, 5), 0},
+    };
+    TestDriver drv(std::move(fake));
+    ASSERT_TRUE(drv.open(""));
+
+    Reading r;
+    EXPECT_TRUE(drv.read(r, 0.0));
+    EXPECT_EQ(r.spectrum[200], 2u);
+    EXPECT_TRUE(drv.read(r, 0.0));
+    EXPECT_EQ(r.spectrum[200], 0u);
+    EXPECT_EQ(r.spectrum[300], 5u);
+}
+
+TEST(D3SDriverTest, DoesNotDiscardWithoutOpen)
+{
+    // Injected devices that were never opened through the driver keep the old behaviour
+    FakeD3SDevice fake;
+    fake.calls = {{true, makeSpectrum(100, 7), 0}};
+    TestDriver drv(std::move(fake));
+
+    Reading r;
+    EXPECT_TRUE(drv.read(r, 0.0));
+    EXPECT_EQ(r.spectrum[100], 7u);
+}
+
+TEST(D3SDriverTest, TemperatureIsNanWhenStatusReadFails)
+{
+    FakeD3SDevice fake;
+    fake.temperature_ok = false;
+    fake.calls = {{true, makeSpectrum(0, 0, 0, 100), 0}};
+    TestDriver drv(std::move(fake));
+
+    Reading r;
+    EXPECT_TRUE(drv.read(r, 0.0));
+    EXPECT_TRUE(std::isnan(r.temperature_c));
 }
 
 TEST(D3SDriverTest, ReturnsFalseWhenStopFlagSet)
